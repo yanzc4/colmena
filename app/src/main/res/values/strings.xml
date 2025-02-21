@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">La Colmena</string>
+    <string name="onesignal_notification_accent_color">FF007600</string>
+</resources>

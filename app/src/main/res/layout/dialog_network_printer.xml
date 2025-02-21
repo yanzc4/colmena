@@ -1,0 +1,63 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <RadioGroup
+        android:id="@+id/sizeRadioGroup"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"> <!-- Horizontal para el tamaño -->
+        <RadioButton
+            android:id="@+id/size58"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="58" />
+        <RadioButton
+            android:id="@+id/size80"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="80" />
+    </RadioGroup>
+
+    <EditText
+        android:id="@+id/editTextIP"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Dirección IP"
+        android:inputType="text" />
+
+    <EditText
+        android:id="@+id/editTextPort"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Puerto"
+        android:inputType="number" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Selecciona la codificación:"
+        android:textStyle="bold"
+        android:paddingTop="16dp"
+        android:paddingBottom="8dp"/>
+
+    <RadioGroup
+        android:id="@+id/encodingRadioGroup"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+        <RadioButton
+            android:id="@+id/utf8"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="UTF-8" />
+        <RadioButton
+            android:id="@+id/iso8859"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ISO-8859-1" />
+    </RadioGroup>
+
+</LinearLayout>

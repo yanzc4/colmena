@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1051333998247",
+    "project_id": "la-colmena-2acc3",
+    "storage_bucket": "la-colmena-2acc3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1051333998247:android:797c1a604ae3d194528d82",
+        "android_client_info": {
+          "package_name": "app.codemultiall.lacolmena"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBgugXmWGoMNfnegdUsYMmTa1qqVGgLUnM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
