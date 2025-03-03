@@ -11,8 +11,8 @@ android {
         applicationId = "app.codemultiall.lacolmena"
         minSdk = 24
         targetSdk = 33
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -47,4 +47,5 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0") // Para compatibilidad
     implementation("com.google.firebase:firebase-messaging:22.0.0")
     implementation("com.pusher:push-notifications-android:1.10.0")
+    implementation("androidx.browser:browser:1.8.0")
 }

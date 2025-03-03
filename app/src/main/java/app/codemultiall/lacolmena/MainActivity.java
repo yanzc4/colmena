@@ -3,6 +3,10 @@ package app.codemultiall.lacolmena;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.browser.customtabs.CustomTabsClient;
+import androidx.browser.customtabs.CustomTabsIntent;
+import androidx.browser.customtabs.CustomTabsServiceConnection;
+import androidx.browser.customtabs.CustomTabsSession;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
@@ -10,11 +14,15 @@ import androidx.core.content.FileProvider;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.ProgressDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -28,6 +36,7 @@ import android.graphics.Color;
 import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Paint;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.pdf.PdfRenderer;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
@@ -37,7 +46,14 @@ import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.provider.Browser;
+import android.provider.MediaStore;
+import android.text.Spannable;
+import android.text.SpannableString;
+import android.text.style.ForegroundColorSpan;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.GestureDetector;
@@ -76,6 +92,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 
@@ -123,6 +140,7 @@ public class MainActivity extends AppCompatActivity {
     private OkHttpClient client;
     private static final long DOUBLE_TAP_TIMEOUT = 300; // Tiempo para reiniciar el contador (en milisegundos)
     private long lastTouchTime = 0;
+    private String webViewCookies;
 
 
     @Override
@@ -138,6 +156,9 @@ public class MainActivity extends AppCompatActivity {
         webView = findViewById(R.id.web);
         splash = findViewById(R.id.splash);
         loading = findViewById(R.id.spinner);
+
+
+
         setupWebView();
         // Verificar si la impresora está configurada
         if (isPrinterConfigured()) {
@@ -165,7 +186,10 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setJavaScriptEnabled(true);
         webSettings.setDomStorageEnabled(true);
         webSettings.setGeolocationEnabled(true);
-        //CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.setAcceptCookie(true);
+        cookieManager.setAcceptThirdPartyCookies(webView, true);
         webView.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
                 webView.goBack();
@@ -188,7 +212,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                if (url.startsWith("https://estudiocontablelacolmena.com/sistema/presentacion/imprimir-venta?modelo=ticket")) {
+                if (url.contains("imprimir-venta?modelo=ticket")) {
                     // Si ya tienes permisos, descarga el PDF
                     String[] params = extractParameters(url);
                     String id = params[0];
@@ -202,7 +226,8 @@ public class MainActivity extends AppCompatActivity {
                         new FetchDataVenta().execute(URL_API);
                     }
                     return true;
-                }else if(url.startsWith("https://estudiocontablelacolmena.com/sistema/presentacion/imprimir-cotizacion?modelo=ticket")){
+                }
+                if(url.contains("imprimir-cotizacion?modelo=ticket")){
                     String[] params = extractParameters(url);
                     String id = params[0];
                     String emisor = params[1];
@@ -215,20 +240,43 @@ public class MainActivity extends AppCompatActivity {
                         new FetchDataCotizacion().execute(URL_API);
                     }
                     return true;
-                } else if (url.startsWith("https://estudiocontablelacolmena.com/sistema/presentacion/imprimir-venta?modelo=pdf")) {
-                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-                    return true;
-                } else {
-                    return super.shouldOverrideUrlLoading(view, url);
                 }
-                //return super.shouldOverrideUrlLoading(view, url);
+
+                if(url.contains("imprimir-guia?modelo=ticket")){
+                    String[] params = extractParameters(url);
+                    String id = params[0];
+                    String emisor = params[1];
+                    // Construir la nueva URL
+                    String URL_API = "https://estudiocontablelacolmena.com/sistema/presentacion/controller/api/guia?id=" + id + "&emisor=" + emisor;
+                    if (!isPrinterConfigured()) {
+                        showPrinterDialog();
+                    }else {
+                        new FetchDataGuia().execute(URL_API);
+                    }
+                    return true;
+                }
+
+                if (url.matches(".*modelo=(xml|cdr).*") || url.contains("imprimir-pedido?modelo=ticket") || url.contains("imprimir-venta?modelo=pdf")) {
+                    abrirEnCustomTab(view.getContext(), url);
+                    return true;
+                }
+                if (url.matches(".*imprimir-(productos|comprobantes|guias|cotizaciones|reportes|guia-dia-mes|clientes|transportistas|conductores).*") || url.contains("plantilla") || url.matches(".*exportar-(sire|excel).*") || url.contains("imprimir-cotizacion?modelo=pdf") || url.contains("imprimir-guia?modelo=pdf")) {
+                    //abrirEnCustomTab(view.getContext(), url);
+                    descargarYAbrirArchivo(view.getContext(), url);
+                    return true;
+                }
+                return super.shouldOverrideUrlLoading(view, url);
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                CookieManager.getInstance().setAcceptCookie(true);
-                CookieManager.getInstance().acceptCookie();
-                CookieManager.getInstance().flush();
+
+                CookieManager cookieManager = CookieManager.getInstance();
+                cookieManager.setAcceptCookie(true);
+                cookieManager.flush(); // Forzar guardado de cookies en memoria
+
+                // Obtener y guardar cookies manualmente
+                webViewCookies = cookieManager.getCookie(url);
 
                 isWebViewLoaded = true;
                 // Oculta el ImageView y muestra el WebView cuando la página haya cargado completamente
@@ -629,6 +677,35 @@ public class MainActivity extends AppCompatActivity {
             mandarImprimirCotizacion(result);
         }
     }
+
+    private class FetchDataGuia extends AsyncTask<String, Void, String> {
+        @Override
+        protected String doInBackground(String... urls) {
+            StringBuilder result = new StringBuilder();
+            try {
+                URL url = new URL(urls[0]);
+                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("GET");
+
+                BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    result.append(line);
+                }
+                reader.close();
+            } catch (Exception e) {
+                Log.e("API Error Guias", "Error: " + e.getMessage());
+            }
+            return result.toString();
+        }
+
+        @Override
+        protected void onPostExecute(String result) {
+            // Aquí puedes manejar el JSON recibido
+            //Log.d("API COTIZACION", result);
+            mandarImprimirGuia(result);
+        }
+    }
     private void mandarImprimirVenta(String data) {
         final Context context = this;
         new Thread(new Runnable() {
@@ -754,19 +831,10 @@ public class MainActivity extends AppCompatActivity {
                         runOnUiThread(() -> {
                             Toast.makeText(MainActivity.this, "Se imprimió el ticket", Toast.LENGTH_SHORT).show();
                         });
-                    } catch (EscPosConnectionException e) {
+                    } catch (Exception e) {
                         e.printStackTrace();
                         runOnUiThread(() -> {
                             Toast.makeText(MainActivity.this, "Error al imprimir el ticket: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                        });
-                    } catch (EscPosEncodingException | EscPosBarcodeException |
-                             EscPosParserException e) {
-                        throw new RuntimeException(e);
-                    } catch (JSONException e) {
-                        e.printStackTrace();
-                        e.printStackTrace();
-                        runOnUiThread(() -> {
-                            Toast.makeText(MainActivity.this, "Error en la lectura del contenido: " + e.getMessage(), Toast.LENGTH_SHORT).show();
                         });
                     }
                 } else {
@@ -890,19 +958,10 @@ public class MainActivity extends AppCompatActivity {
                         runOnUiThread(() -> {
                             Toast.makeText(MainActivity.this, "Se imprimió el ticket", Toast.LENGTH_SHORT).show();
                         });
-                    } catch (EscPosConnectionException e) {
+                    } catch (Exception e) {
                         e.printStackTrace();
                         runOnUiThread(() -> {
                             Toast.makeText(MainActivity.this, "Error al imprimir el ticket: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                        });
-                    } catch (EscPosEncodingException | EscPosBarcodeException |
-                             EscPosParserException e) {
-                        throw new RuntimeException(e);
-                    } catch (JSONException e) {
-                        e.printStackTrace();
-                        e.printStackTrace();
-                        runOnUiThread(() -> {
-                            Toast.makeText(MainActivity.this, "Error en la lectura del contenido: " + e.getMessage(), Toast.LENGTH_SHORT).show();
                         });
                     }
                 } else {
@@ -914,6 +973,167 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
+    private void mandarImprimirGuia(String data) {
+        final Context context = this;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                // Cargar el bitmap desde el archivo PNG
+                if (data != null && isPrinterConfigured()) {
+                    String printerType = getPreference("printer_type");
+                    EscPosPrinter printer = null;
+                    int size = 0;
+                    String linea = "";
+
+                    try {
+                        if ("bluetooth".equals(printerType)) {
+                            size = Integer.parseInt(getPreference("bluetooth_size"));
+                            String encode = getPreference("bluetooth_encode");
+                            if (size == 58) {
+                                printer = new EscPosPrinter(BluetoothPrintersConnections.selectFirstPaired(), 203, 48f, 32, new EscPosCharsetEncoding(encode, 6));
+                                linea = "[L]--------------------------------\n";
+                            } else if (size == 80) {
+                                printer = new EscPosPrinter(BluetoothPrintersConnections.selectFirstPaired(), 203, 72f, 48, new EscPosCharsetEncoding(encode, 6));
+                                linea = "[L]------------------------------------------------\n";
+                            }
+                        } else if ("network".equals(printerType)) {
+                            String ip = getPreference("network_ip");
+                            String encode = getPreference("network_encode");
+                            int port = Integer.parseInt(getPreference("network_port"));
+                            size = Integer.parseInt(getPreference("network_size"));
+                            TcpConnection conexion = new TcpConnection(ip, port, 15);
+                            if (size == 58) {
+                                linea = "[L]--------------------------------\n";
+                                printer = new EscPosPrinter(conexion, 203, 48f, 32, new EscPosCharsetEncoding(encode, 6));
+                            } else if (size == 80) {
+                                linea = "[L]------------------------------------------------\n";
+                                printer = new EscPosPrinter(conexion, 203, 72f, 48, new EscPosCharsetEncoding(encode, 6));
+                            }
+                        }
+
+                        // Parsear el JSON
+                        JSONObject jsonObject = new JSONObject(data);
+
+                        // Obtener los datos del emisor, cliente, venta y ley
+                        JSONObject emisor = jsonObject.getJSONObject("emisor");
+                        JSONObject destinatario = jsonObject.getJSONObject("destinatario");
+                        JSONObject guia = jsonObject.getJSONObject("guia");
+                        JSONObject partida = guia.getJSONObject("punto_partida");
+                        JSONObject llegada = guia.getJSONObject("punto_llegada");
+                        JSONObject transporte = jsonObject.getJSONObject("transporte");
+                        JSONArray detalle = jsonObject.getJSONArray("dt_guia");
+                        String ley = jsonObject.getString("ley");
+                        String contenidoQR = jsonObject.getString("contenido_qr");
+
+                        String url = emisor.getString("img");
+                        Bitmap imagen = downloadImage(url);
+                        // Convertir el bitmap a hexadecimal y enviar a imprimir
+                        assert printer != null;
+                        StringBuilder printText = new StringBuilder();
+                        // Agregar la imagen al principio del ticket
+                        printText.append("[C]<img>").append(PrinterTextParserImg.bitmapToHexadecimalString(printer, imagen)).append("</img>\n");
+                        printText.append("[L]\n");
+                        printText.append("[C]<b>").append(emisor.getString("nombre_comercial")).append("</b>\n");
+                        printText.append("[C]").append(emisor.getString("direccion")).append("\n");
+                        printText.append("[C]CEL: ").append(emisor.getString("celular")).append("\n");
+                        printText.append("[C]EMAIL: ").append(emisor.getString("correo")).append("\n");
+                        printText.append(linea);
+                        printText.append("[C]<b>RUC: ").append(emisor.getString("documento")).append("</b>\n");
+                        printText.append("[C]<b>").append(guia.getString("tipo_comprobate")).append("</b>\n");
+                        printText.append("[C]<b>").append(guia.getString("serie")).append("</b>\n");
+                        printText.append(linea);
+                        printText.append("[C]<b>").append("DATOS DEL TRASLADO").append("</b>\n");
+                        printText.append("[L]<b>FECHA EMISIÓN: </b>").append(guia.getString("fecha_emision")).append("\n");
+                        printText.append("[L]<b>FECHA DE TRASLADO: </b>").append(guia.getString("fecha_traslado")).append("\n");
+
+                        if(guia.has("motivo_traslado")){
+                            printText.append("[L]<b>MOT. DE TRASLADO: </b>").append(guia.getString("motivo_traslado")).append("\n");
+                        }
+                        if(guia.has("modalidad_transporte")){
+                            printText.append("[L]<b>MOD. TRANSPORTE: </b>").append(guia.getString("modalidad_transporte")).append("\n");
+                        }
+                        printText.append("[L]<b>PESO TOTAL: </b>").append(guia.getString("peso_bruto")).append("\n");
+                        printText.append("[L]<b>INDICADOR DE ENVIO SUNAT: </b>").append(guia.getString("indicador")).append("\n");
+                        if(!guia.getString("observacion").equals("null")) {
+                            printText.append("[L]<b>OBSERVACIÓN: </b>").append(guia.getString("observacion")).append("\n");
+                        }
+                        printText.append(linea);
+
+                        printText.append("[C]<b>").append("DATOS DEL DESTINATARIO").append("</b>\n");
+                        printText.append("[L]<b>DOCUMENTO: </b>").append(destinatario.getString("documento")).append("\n");
+                        printText.append("[L]<b>RAZON SOCIAL: </b>").append(destinatario.getString("razon_social")).append("\n");
+                        printText.append(linea);
+
+                        printText.append("[C]<b>").append("PUNTO DE PARTIDA").append("</b>\n");
+                        printText.append("[C]").append(partida.getString("direccion")).append("\n");
+                        printText.append("[C]").append(partida.getString("ubigeo")).append("\n");
+                        printText.append("[C]").append(partida.getString("referencia").equals("null") ? "" : partida.getString("referencia")).append("\n");
+                        printText.append("[C]<b>").append("PUNTO DE LLEGADA").append("</b>\n");
+                        printText.append("[C]").append(llegada.getString("direccion")).append("\n");
+                        printText.append("[C]").append(llegada.getString("ubigeo")).append("\n");
+                        printText.append("[C]").append(llegada.getString("referencia").equals("null") ? "" : llegada.getString("referencia")).append("\n");
+                        printText.append(linea);
+
+                        if(transporte.has("placas")){
+                            JSONArray placas = transporte.getJSONArray("placas");
+                            printText.append("[C]<b>").append("DATOS DEL TRANSPORTE").append("</b>\n");
+                            printText.append("[L]<b>DOC. CONDUCTOR: </b>").append(transporte.getString("documento")).append("\n");
+                            printText.append("[L]<b>NOMB. Y APELL. CONDUCTOR: </b>").append(transporte.getString("razon_social")).append("\n");
+                            printText.append("[L]<b>LIC. CON. CONDUCTOR: </b>").append(transporte.getString("licencia")).append("\n");
+
+                            for (int p = 0; p < placas.length(); p++) {
+                                JSONObject placa = placas.getJSONObject(p);
+                                // Combinar cantidad y descripción
+                                printText.append("[L]<b>PLACA VEH. </b>").append(placa.getString("vehiculo").toUpperCase()).append(": ").append(placa.getString("numero")).append("\n");
+                            }
+                        }else{
+                            printText.append("[C]<b>").append("DATOS DEL TRANSPORTISTA").append("</b>\n");
+                            printText.append("[L]<b>RUC: </b>").append(transporte.getString("documento")).append("\n");
+                            printText.append("[L]<b>RAZON SOCIAL: </b>").append(transporte.getString("razon_social")).append("\n");
+                            if(!transporte.getString("registro_mtc").equals("null")) {
+                                printText.append("[L]<b>REG. MTC: </b>").append(transporte.getString("registro_mtc")).append("\n");
+                            }
+                        }
+
+                        printText.append("[L]\n");
+
+                        printText.append("[L]<b>DESCRIPCIÓN [R]CANT.</b>\n");
+                        printText.append(linea);
+
+                        // Añadir los detalles de los productos
+                        for (int i = 0; i < detalle.length(); i++) {
+                            JSONObject item = detalle.getJSONObject(i);
+                            String cantidad = item.getString("cantidad");
+                            String descripcion = item.getString("descripcion");
+                            // Combinar cantidad y descripción
+                            //printText.append("[L]").append(descripcion).append("[R]").append(cantidad).append("\n");
+                            printText.append("[L]").append(descripcion).append("  ").append(cantidad).append("\n");
+                            printText.append(linea);
+                        }
+
+                        printText.append("[C]<qrcode size='20'>").append(contenidoQR).append("</qrcode>\n");
+                        printText.append("[C]").append(ley).append("\n");
+                        printText.append("[C]- GRACIAS POR SU COMPRA - \n");
+
+                        printer.printFormattedTextAndCut(printText.toString());
+
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this, "Se imprimió la guia", Toast.LENGTH_SHORT).show();
+                        });
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this, "Error al imprimir la guia: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                        });
+                    }
+                } else {
+                    runOnUiThread(() -> {
+                        Toast.makeText(MainActivity.this, "Error obtener datos", Toast.LENGTH_SHORT).show();
+                    });
+                }
+            }
+        }).start();
+    }
 
     //con imagen
     private Bitmap downloadImage(String imageUrl) {
@@ -951,6 +1171,14 @@ public class MainActivity extends AppCompatActivity {
                         // Convertir la imagen a Bitmap
                         Bitmap originalBitmap = BitmapFactory.decodeFile(imageFile.getAbsolutePath());
 
+                        if (originalBitmap == null) {
+                            runOnUiThread(() -> {
+                                Toast.makeText(MainActivity.this, "Error en la url de la imagen", Toast.LENGTH_SHORT).show();
+                            });
+                            latch.countDown();
+                            return;
+                        }
+
                         // Redimensionar el Bitmap
                         bitmapHolder[0] = Bitmap.createScaledBitmap(originalBitmap, 256,
                                 Math.round(originalBitmap.getHeight() * (256.0f / originalBitmap.getWidth())),
@@ -978,6 +1206,106 @@ public class MainActivity extends AppCompatActivity {
         }
 
         return bitmapHolder[0]; // Retornar el bitmap
+    }
+
+    //para abrir las tabs
+    public void abrirEnCustomTab(Context context, String url) {
+        CustomTabsIntent.Builder builder = new CustomTabsIntent.Builder();
+        CustomTabsIntent customTabsIntent = builder.build();
+        customTabsIntent.launchUrl(context, Uri.parse(url));
+    }
+
+    public void descargarYAbrirArchivo(Context context, String url) {
+
+        // Mostrar un ProgressDialog
+        int verdeColor = ContextCompat.getColor(context, R.color.verde);
+        ProgressDialog progressDialog = new ProgressDialog(context);
+        progressDialog.setCancelable(false);
+
+        // Cambiar color del texto a blanco
+        SpannableString message = new SpannableString("Descargando archivo...");
+        message.setSpan(new ForegroundColorSpan(Color.WHITE), 0, message.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        progressDialog.setMessage(message);
+
+        // Cambiar el fondo del ProgressDialog a verde
+        progressDialog.getWindow().setBackgroundDrawable(new ColorDrawable(verdeColor));
+
+        progressDialog.show();
+
+        Request request = new Request.Builder()
+                .url(url)
+                .addHeader("Cookie", webViewCookies) // 🔥 Pasamos la cookie aquí
+                .build();
+
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                Log.e("DESCARGA", "Error en la descarga", e);
+
+                // Cerrar ProgressDialog y mostrar error
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    progressDialog.dismiss();
+                    Toast.makeText(context, "Error al descargar el archivo", Toast.LENGTH_SHORT).show();
+                });
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (response.isSuccessful()) {
+                    String fileName = url.substring(url.lastIndexOf("/") + 1);
+                    Uri fileUri = null;
+                    File file = null;
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        ContentValues values = new ContentValues();
+                        values.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
+                        values.put(MediaStore.Downloads.MIME_TYPE, response.body().contentType().toString());
+                        values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+
+                        ContentResolver resolver = context.getContentResolver();
+                        fileUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+
+                        if (fileUri != null) {
+                            try (OutputStream outputStream = resolver.openOutputStream(fileUri)) {
+                                outputStream.write(response.body().bytes());
+                            }
+                        }
+                    } else {
+                        file = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName);
+                        try (FileOutputStream fos = new FileOutputStream(file)) {
+                            fos.write(response.body().bytes());
+                        }
+                        fileUri = Uri.fromFile(file);
+                    }
+
+                    if (fileUri != null) {
+                        new Handler(Looper.getMainLooper()).post(() -> {
+                            progressDialog.dismiss(); // Cerrar ProgressDialog
+                            Toast.makeText(context, "Descarga completada", Toast.LENGTH_SHORT).show();
+                        });
+
+                        Intent intent = new Intent(Intent.ACTION_VIEW);
+                        intent.setData(fileUri);
+                        intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+                        String mimeType = response.body().contentType().toString();
+
+
+                        intent.setDataAndType(fileUri, mimeType);
+
+                        try {
+                            context.startActivity(intent);
+                        } catch (ActivityNotFoundException e) {
+                            Log.e("DESCARGA", "No hay aplicación para abrir el archivo");
+                            new Handler(Looper.getMainLooper()).post(() ->
+                                    Toast.makeText(context, "No hay aplicación para abrir el archivo", Toast.LENGTH_SHORT).show()
+                            );
+                        }
+                    }
+                }
+            }
+        });
     }
 
 
